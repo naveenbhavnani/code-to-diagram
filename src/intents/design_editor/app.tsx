@@ -333,12 +333,20 @@ export const App = () => {
       <Box padding="2u">
         <Rows spacing="2u">
         {/* Syntax Selector */}
-        <Select
-          options={SYNTAX_OPTIONS}
-          value={syntax}
-          onChange={handleSyntaxChange}
-          stretch
-        />
+        <Rows spacing="1u">
+          <Title size="small">
+            <FormattedMessage
+              defaultMessage="Diagram type"
+              description="Label for the diagram type selector dropdown"
+            />
+          </Title>
+          <Select
+            options={SYNTAX_OPTIONS}
+            value={syntax}
+            onChange={handleSyntaxChange}
+            stretch
+          />
+        </Rows>
 
         {/* Collapsible Syntax Reference */}
         <Accordion>
