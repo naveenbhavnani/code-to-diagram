@@ -14,7 +14,7 @@ import {
 } from "@canva/app-ui-kit";
 import { upload } from "@canva/asset";
 import { addElementAtCursor, addElementAtPoint } from "@canva/design";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { instance, type Viz } from "@viz-js/viz";
 import nomnoml from "nomnoml";
@@ -25,14 +25,12 @@ import * as styles from "styles/components.css";
 type DiagramSyntax = "graphviz" | "nomnoml" | "wavedrom";
 
 interface SyntaxConfig {
-  label: string;
   defaultCode: string;
   syntaxHelp: { label: string; description: string }[];
 }
 
 const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
   graphviz: {
-    label: "DOT (Flowcharts)",
     defaultCode: `digraph G {
   rankdir=TB
 
@@ -57,7 +55,6 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
     ],
   },
   nomnoml: {
-    label: "Nomnoml (UML)",
     defaultCode: `[User] -> [Application]
 [Application] -> [Database]
 
@@ -89,7 +86,6 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
     ],
   },
   wavedrom: {
-    label: "WaveDrom (Timing)",
     defaultCode: `{ "signal": [
   { "name": "clk", "wave": "p......." },
   { "name": "data", "wave": "x.345x..", "data": ["A", "B", "C"] },
@@ -106,14 +102,37 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
   },
 };
 
-const SYNTAX_OPTIONS = Object.entries(SYNTAX_CONFIGS).map(([value, config]) => ({
-  label: config.label,
-  value,
-}));
-
 export const App = () => {
   const intl = useIntl();
   const isSupported = useFeatureSupport();
+
+  // Translated syntax options for the dropdown
+  const syntaxOptions = useMemo(
+    () => [
+      {
+        value: "graphviz",
+        label: intl.formatMessage({
+          defaultMessage: "DOT (Flowcharts)",
+          description: "Dropdown option for DOT/Graphviz flowchart syntax",
+        }),
+      },
+      {
+        value: "nomnoml",
+        label: intl.formatMessage({
+          defaultMessage: "Nomnoml (UML)",
+          description: "Dropdown option for Nomnoml UML diagram syntax",
+        }),
+      },
+      {
+        value: "wavedrom",
+        label: intl.formatMessage({
+          defaultMessage: "WaveDrom (Timing)",
+          description: "Dropdown option for WaveDrom timing diagram syntax",
+        }),
+      },
+    ],
+    [intl]
+  );
   const addElement = [addElementAtPoint, addElementAtCursor].find((fn) =>
     isSupported(fn)
   );
@@ -341,7 +360,7 @@ export const App = () => {
             />
           </Title>
           <Select
-            options={SYNTAX_OPTIONS}
+            options={syntaxOptions}
             value={syntax}
             onChange={handleSyntaxChange}
             stretch
