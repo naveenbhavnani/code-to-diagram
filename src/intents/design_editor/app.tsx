@@ -19,14 +19,102 @@ import { FormattedMessage, useIntl } from "react-intl";
 import { instance, type Viz } from "@viz-js/viz";
 import nomnoml from "nomnoml";
 import wavedrom from "wavedrom";
+import mermaid from "mermaid";
+import { render as svgbobRender } from "svgbob-wasm";
+import * as vegaLite from "vega-lite";
+import * as vega from "vega";
+import {
+  Diagram as RailroadDiagram,
+  Sequence,
+  Choice,
+  Optional,
+  OneOrMore,
+  ZeroOrMore,
+  Terminal,
+  NonTerminal,
+  Comment,
+  Skip,
+  type DiagramItem,
+} from "railroad-diagrams";
 import * as styles from "styles/components.css";
 
+// Initialize mermaid with no auto-start
+mermaid.initialize({ startOnLoad: false, theme: "default" });
+
 // Diagram syntax types
-type DiagramSyntax = "graphviz" | "nomnoml" | "wavedrom";
+type DiagramSyntax =
+  | "graphviz"
+  | "nomnoml"
+  | "wavedrom"
+  | "mermaid"
+  | "svgbob"
+  | "vegalite"
+  | "railroad";
 
 interface SyntaxConfig {
   defaultCode: string;
   syntaxHelp: { label: string; description: string }[];
+}
+
+// Railroad diagram JSON node types
+interface RailroadNode {
+  type: string;
+  text?: string;
+  items?: RailroadNode[];
+  default?: number;
+  repeat?: RailroadNode;
+  skip?: string;
+}
+
+function buildRailroadItem(
+  node: RailroadNode
+): DiagramItem | string {
+  switch (node.type) {
+    case "Terminal":
+      return Terminal(node.text ?? "");
+    case "NonTerminal":
+      return NonTerminal(node.text ?? "");
+    case "Comment":
+      return Comment(node.text ?? "");
+    case "Skip":
+      return Skip();
+    case "Sequence":
+      return Sequence(
+        ...(node.items ?? []).map(buildRailroadItem)
+      );
+    case "Choice":
+      return Choice(
+        node.default ?? 0,
+        ...(node.items ?? []).map(buildRailroadItem)
+      );
+    case "Optional":
+      return Optional(
+        node.items?.[0]
+          ? buildRailroadItem(node.items[0])
+          : "",
+        node.skip
+      );
+    case "OneOrMore":
+      return OneOrMore(
+        node.items?.[0]
+          ? buildRailroadItem(node.items[0])
+          : "",
+        node.repeat
+          ? buildRailroadItem(node.repeat)
+          : undefined
+      );
+    case "ZeroOrMore":
+      return ZeroOrMore(
+        node.items?.[0]
+          ? buildRailroadItem(node.items[0])
+          : "",
+        node.repeat
+          ? buildRailroadItem(node.repeat)
+          : undefined
+      );
+    default:
+      return Terminal(node.text ?? node.type);
+  }
 }
 
 const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
@@ -48,10 +136,23 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
 }`,
     syntaxHelp: [
       { label: "Basic", description: "digraph G { A -> B }" },
-      { label: "Shapes", description: "node [shape=box/ellipse/diamond]" },
-      { label: "Styles", description: "[style=filled, fillcolor=lightblue]" },
-      { label: "Labels", description: "A [label=text] | A -> B [label=text]" },
-      { label: "Direction", description: "rankdir=TB (top-bottom) | LR (left-right)" },
+      {
+        label: "Shapes",
+        description: "node [shape=box/ellipse/diamond]",
+      },
+      {
+        label: "Styles",
+        description: "[style=filled, fillcolor=lightblue]",
+      },
+      {
+        label: "Labels",
+        description: "A [label=text] | A -> B [label=text]",
+      },
+      {
+        label: "Direction",
+        description:
+          "rankdir=TB (top-bottom) | LR (left-right)",
+      },
     ],
   },
   nomnoml: {
@@ -78,11 +179,26 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
   +query()
 ]`,
     syntaxHelp: [
-      { label: "Class", description: "[ClassName| +field: type | +method()]" },
-      { label: "Association", description: "[A] -> [B] or [A] - [B]" },
-      { label: "Inheritance", description: "[Child] -:> [Parent]" },
-      { label: "Composition", description: "[Whole] +--> [Part]" },
-      { label: "Note", description: "[<note> This is a note]" },
+      {
+        label: "Class",
+        description: "[ClassName| +field: type | +method()]",
+      },
+      {
+        label: "Association",
+        description: "[A] -> [B] or [A] - [B]",
+      },
+      {
+        label: "Inheritance",
+        description: "[Child] -:> [Parent]",
+      },
+      {
+        label: "Composition",
+        description: "[Whole] +--> [Part]",
+      },
+      {
+        label: "Note",
+        description: "[<note> This is a note]",
+      },
     ],
   },
   wavedrom: {
@@ -93,14 +209,206 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
   { "name": "ack", "wave": "1....0.." }
 ]}`,
     syntaxHelp: [
-      { label: "Clock", description: '"wave": "p" or "n" (pos/neg edge)' },
-      { label: "Signal", description: '"wave": "0", "1", "x", "=" (low/high/unknown/data)' },
-      { label: "Data", description: '"data": ["val1", "val2"]' },
-      { label: "Gap", description: '"wave": "." (continue previous)' },
-      { label: "Groups", description: '["Group", { name, wave }, ...]' },
+      {
+        label: "Clock",
+        description: '"wave": "p" or "n" (pos/neg edge)',
+      },
+      {
+        label: "Signal",
+        description:
+          '"wave": "0", "1", "x", "=" (low/high/unknown/data)',
+      },
+      {
+        label: "Data",
+        description: '"data": ["val1", "val2"]',
+      },
+      {
+        label: "Gap",
+        description: '"wave": "." (continue previous)',
+      },
+      {
+        label: "Groups",
+        description: '["Group", { name, wave }, ...]',
+      },
+    ],
+  },
+  mermaid: {
+    defaultCode: `graph TD
+  A[Start] --> B{Decision}
+  B -->|Yes| C[Process A]
+  B -->|No| D[Process B]
+  C --> E[End]
+  D --> E`,
+    syntaxHelp: [
+      {
+        label: "Flowchart",
+        description: "graph TD; A-->B; B-->C",
+      },
+      {
+        label: "Sequence",
+        description:
+          "sequenceDiagram; Alice->>Bob: Hello",
+      },
+      {
+        label: "Class",
+        description: "classDiagram; class Animal { +name }",
+      },
+      {
+        label: "ER",
+        description:
+          "erDiagram; CUSTOMER ||--o{ ORDER : places",
+      },
+      {
+        label: "Gantt",
+        description:
+          "gantt; title Plan; section A; Task :a1, 2024-01-01, 30d",
+      },
+    ],
+  },
+  svgbob: {
+    defaultCode: `       .----.
+      |    |
+      v    |
+  +--------+-------+
+  |  Start |       |
+  +--------+       |
+      |            |
+      v            |
+  +--------+       |
+  | Process|-------'
+  +--------+
+      |
+      v
+  +--------+
+  |  End   |
+  +--------+`,
+    syntaxHelp: [
+      {
+        label: "Boxes",
+        description: "+----+ or .----. for rounded",
+      },
+      {
+        label: "Arrows",
+        description: "-->, <--, <-->, |, v, ^",
+      },
+      { label: "Lines", description: "--- or |" },
+      { label: "Text", description: "Place text inside boxes" },
+      {
+        label: "Circles",
+        description: "Use ( ) for circles in connections",
+      },
+    ],
+  },
+  vegalite: {
+    defaultCode: `{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A simple bar chart",
+  "data": {
+    "values": [
+      {"category": "A", "value": 28},
+      {"category": "B", "value": 55},
+      {"category": "C", "value": 43},
+      {"category": "D", "value": 91},
+      {"category": "E", "value": 81}
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "category", "type": "nominal"},
+    "y": {"field": "value", "type": "quantitative"}
+  }
+}`,
+    syntaxHelp: [
+      {
+        label: "Mark",
+        description: '"mark": "bar/line/point/area/arc"',
+      },
+      {
+        label: "Encoding",
+        description:
+          '"encoding": { "x": { "field", "type" } }',
+      },
+      {
+        label: "Types",
+        description:
+          "quantitative, nominal, ordinal, temporal",
+      },
+      {
+        label: "Data",
+        description: '"data": { "values": [...] }',
+      },
+      {
+        label: "Layers",
+        description: '"layer": [{ "mark", "encoding" }, ...]',
+      },
+    ],
+  },
+  railroad: {
+    defaultCode: `{
+  "type": "Diagram",
+  "items": [
+    { "type": "Terminal", "text": "SELECT" },
+    {
+      "type": "Choice",
+      "default": 0,
+      "items": [
+        { "type": "Terminal", "text": "*" },
+        {
+          "type": "OneOrMore",
+          "items": [
+            { "type": "NonTerminal", "text": "column" }
+          ],
+          "repeat": { "type": "Terminal", "text": "," }
+        }
+      ]
+    },
+    { "type": "Terminal", "text": "FROM" },
+    { "type": "NonTerminal", "text": "table" },
+    {
+      "type": "Optional",
+      "items": [
+        {
+          "type": "Sequence",
+          "items": [
+            { "type": "Terminal", "text": "WHERE" },
+            { "type": "NonTerminal", "text": "condition" }
+          ]
+        }
+      ]
+    }
+  ]
+}`,
+    syntaxHelp: [
+      {
+        label: "Terminal",
+        description:
+          '{ "type": "Terminal", "text": "keyword" }',
+      },
+      {
+        label: "NonTerminal",
+        description:
+          '{ "type": "NonTerminal", "text": "rule" }',
+      },
+      {
+        label: "Choice",
+        description:
+          '{ "type": "Choice", "default": 0, "items": [...] }',
+      },
+      {
+        label: "Optional",
+        description: '{ "type": "Optional", "items": [...] }',
+      },
+      {
+        label: "Repeat",
+        description:
+          '{ "type": "OneOrMore"/"ZeroOrMore", "items": [...], "repeat": {...} }',
+      },
     ],
   },
 };
+
+// Counter for unique mermaid render IDs
+let mermaidRenderCounter = 0;
 
 export const App = () => {
   const intl = useIntl();
@@ -113,32 +421,70 @@ export const App = () => {
         value: "graphviz",
         label: intl.formatMessage({
           defaultMessage: "DOT (Flowcharts)",
-          description: "Dropdown option for DOT/Graphviz flowchart syntax",
+          description:
+            "Dropdown option for DOT/Graphviz flowchart syntax",
         }),
       },
       {
         value: "nomnoml",
         label: intl.formatMessage({
           defaultMessage: "Nomnoml (UML)",
-          description: "Dropdown option for Nomnoml UML diagram syntax",
+          description:
+            "Dropdown option for Nomnoml UML diagram syntax",
         }),
       },
       {
         value: "wavedrom",
         label: intl.formatMessage({
           defaultMessage: "WaveDrom (Timing)",
-          description: "Dropdown option for WaveDrom timing diagram syntax",
+          description:
+            "Dropdown option for WaveDrom timing diagram syntax",
+        }),
+      },
+      {
+        value: "mermaid",
+        label: intl.formatMessage({
+          defaultMessage: "Mermaid (Multi-purpose)",
+          description:
+            "Dropdown option for Mermaid multi-purpose diagram syntax",
+        }),
+      },
+      {
+        value: "svgbob",
+        label: intl.formatMessage({
+          defaultMessage: "Svgbob (ASCII Art)",
+          description:
+            "Dropdown option for Svgbob ASCII art diagram syntax",
+        }),
+      },
+      {
+        value: "vegalite",
+        label: intl.formatMessage({
+          defaultMessage: "Vega-Lite (Charts)",
+          description:
+            "Dropdown option for Vega-Lite chart syntax",
+        }),
+      },
+      {
+        value: "railroad",
+        label: intl.formatMessage({
+          defaultMessage: "Railroad (Syntax)",
+          description:
+            "Dropdown option for Railroad syntax diagram",
         }),
       },
     ],
     [intl]
   );
-  const addElement = [addElementAtPoint, addElementAtCursor].find((fn) =>
-    isSupported(fn)
+  const addElement = [addElementAtPoint, addElementAtCursor].find(
+    (fn) => isSupported(fn)
   );
 
-  const [syntax, setSyntax] = useState<DiagramSyntax>("graphviz");
-  const [codeInput, setCodeInput] = useState(SYNTAX_CONFIGS.graphviz.defaultCode);
+  const [syntax, setSyntax] =
+    useState<DiagramSyntax>("graphviz");
+  const [codeInput, setCodeInput] = useState(
+    SYNTAX_CONFIGS.graphviz.defaultCode
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasValidDiagram, setHasValidDiagram] = useState(false);
@@ -177,7 +523,6 @@ export const App = () => {
             return true;
           }
           case "nomnoml": {
-            // Trim each line to remove trailing spaces that cause parsing issues
             const cleaned = code
               .split("\n")
               .map((line) => line.trimEnd())
@@ -190,9 +535,28 @@ export const App = () => {
           case "wavedrom": {
             const trimmed = code.trim();
             const parsed = JSON.parse(trimmed);
-            const onml = wavedrom.renderAny(0, parsed, wavedrom.waveSkin);
+            const onml = wavedrom.renderAny(
+              0,
+              parsed,
+              wavedrom.waveSkin
+            );
             const html = wavedrom.onml.stringify(onml);
             container.innerHTML = html;
+            return true;
+          }
+          case "svgbob": {
+            const svgString = svgbobRender(code);
+            container.innerHTML = svgString;
+            return true;
+          }
+          case "railroad": {
+            const spec = JSON.parse(code.trim()) as RailroadNode;
+            const items = (spec.items ?? []).map(
+              buildRailroadItem
+            );
+            const diagram = RailroadDiagram(...items);
+            const svgEl = diagram.toSVG();
+            container.appendChild(svgEl);
             return true;
           }
           default:
@@ -205,33 +569,106 @@ export const App = () => {
     [syntax, vizInstance]
   );
 
+  // Async render for mermaid and vega-lite
+  const renderDiagramAsync = useCallback(
+    async (
+      container: HTMLDivElement,
+      code: string
+    ): Promise<boolean> => {
+      container.innerHTML = "";
+
+      if (!code.trim()) {
+        return false;
+      }
+
+      try {
+        switch (syntax) {
+          case "mermaid": {
+            const id = `mermaid-${++mermaidRenderCounter}`;
+            const { svg } = await mermaid.render(id, code);
+            container.innerHTML = svg;
+            return true;
+          }
+          case "vegalite": {
+            const spec = JSON.parse(code.trim());
+            const vgSpec = vegaLite.compile(spec).spec;
+            const view = new vega.View(
+              vega.parse(vgSpec),
+              { renderer: "none" }
+            );
+            const svgString = await view.toSVG();
+            view.finalize();
+            container.innerHTML = svgString;
+            return true;
+          }
+          default:
+            return false;
+        }
+      } catch {
+        return false;
+      }
+    },
+    [syntax]
+  );
+
+  const isAsyncSyntax = syntax === "mermaid" || syntax === "vegalite";
+
   // Render preview whenever input or syntax changes
   useEffect(() => {
     if (!previewRef.current) return;
 
+    const invalidSyntaxMsg = intl.formatMessage({
+      defaultMessage: "Invalid syntax",
+      description:
+        "Error message when diagram syntax is invalid",
+    });
+
+    if (isAsyncSyntax) {
+      let cancelled = false;
+      renderDiagramAsync(previewRef.current, codeInput)
+        .then((success) => {
+          if (cancelled) return;
+          setHasValidDiagram(success);
+          if (success) {
+            setError(null);
+          } else if (codeInput.trim()) {
+            setError(invalidSyntaxMsg);
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setHasValidDiagram(false);
+          setError(invalidSyntaxMsg);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     try {
-      const success = renderDiagram(previewRef.current, codeInput);
+      const success = renderDiagram(
+        previewRef.current,
+        codeInput
+      );
       setHasValidDiagram(success);
       if (success) {
         setError(null);
       } else if (codeInput.trim()) {
-        setError(
-          intl.formatMessage({
-            defaultMessage: "Invalid syntax",
-            description: "Error message when diagram syntax is invalid",
-          })
-        );
+        setError(invalidSyntaxMsg);
       }
     } catch {
       setHasValidDiagram(false);
-      setError(
-        intl.formatMessage({
-          defaultMessage: "Invalid syntax",
-          description: "Error message when diagram syntax is invalid",
-        })
-      );
+      setError(invalidSyntaxMsg);
     }
-  }, [codeInput, syntax, renderDiagram, intl]);
+    return undefined;
+  }, [
+    codeInput,
+    syntax,
+    renderDiagram,
+    renderDiagramAsync,
+    isAsyncSyntax,
+    intl,
+  ]);
 
   const handleAddToDesign = async () => {
     if (!addElement || !exportRef.current) {
@@ -243,22 +680,37 @@ export const App = () => {
 
     try {
       // Render fresh diagram for export
-      const success = renderDiagram(exportRef.current, codeInput);
+      let success: boolean;
+      if (isAsyncSyntax) {
+        success = await renderDiagramAsync(
+          exportRef.current,
+          codeInput
+        );
+      } else {
+        success = renderDiagram(exportRef.current, codeInput);
+      }
       if (!success) {
         throw new Error("Failed to render diagram");
       }
 
-      const svgElement = exportRef.current.querySelector("svg");
+      const svgElement =
+        exportRef.current.querySelector("svg");
       if (!svgElement) {
         throw new Error("No SVG found");
       }
 
       // Clone the SVG
-      const svgClone = svgElement.cloneNode(true) as SVGElement;
+      const svgClone = svgElement.cloneNode(
+        true
+      ) as SVGElement;
 
       // Get dimensions
-      const width = parseFloat(svgElement.getAttribute("width") || "400");
-      const height = parseFloat(svgElement.getAttribute("height") || "300");
+      const width = parseFloat(
+        svgElement.getAttribute("width") || "400"
+      );
+      const height = parseFloat(
+        svgElement.getAttribute("height") || "300"
+      );
 
       // Add padding
       const padding = 20;
@@ -268,7 +720,9 @@ export const App = () => {
       // Update viewBox
       const viewBox = svgElement.getAttribute("viewBox");
       if (viewBox) {
-        const parts = viewBox.split(/[\s,]+/).map(parseFloat);
+        const parts = viewBox
+          .split(/[\s,]+/)
+          .map(parseFloat);
         const vbX = parts[0] ?? 0;
         const vbY = parts[1] ?? 0;
         const vbW = parts[2] ?? width;
@@ -296,10 +750,13 @@ export const App = () => {
 
       // Serialize SVG
       const serializer = new XMLSerializer();
-      const svgString = serializer.serializeToString(svgClone);
+      const svgString =
+        serializer.serializeToString(svgClone);
 
       // Convert to base64
-      const base64 = btoa(unescape(encodeURIComponent(svgString)));
+      const base64 = btoa(
+        unescape(encodeURIComponent(svgString))
+      );
       const dataUrl = `data:image/svg+xml;base64,${base64}`;
 
       // Upload to Canva
@@ -327,7 +784,8 @@ export const App = () => {
       setError(
         intl.formatMessage({
           defaultMessage: "Failed to add diagram to design",
-          description: "Error message when adding diagram fails",
+          description:
+            "Error message when adding diagram fails",
         })
       );
     } finally {
@@ -351,115 +809,132 @@ export const App = () => {
       />
       <Box padding="2u">
         <Rows spacing="2u">
-        {/* Syntax Selector */}
-        <Rows spacing="1u">
-          <Title size="small">
-            <FormattedMessage
-              defaultMessage="Diagram type"
-              description="Label for the diagram type selector dropdown"
+          {/* Syntax Selector */}
+          <Rows spacing="1u">
+            <Title size="small">
+              <FormattedMessage
+                defaultMessage="Diagram type"
+                description="Label for the diagram type selector dropdown"
+              />
+            </Title>
+            <Select
+              options={syntaxOptions}
+              value={syntax}
+              onChange={handleSyntaxChange}
+              stretch
             />
-          </Title>
-          <Select
-            options={syntaxOptions}
-            value={syntax}
-            onChange={handleSyntaxChange}
-            stretch
-          />
-        </Rows>
+          </Rows>
 
-        {/* Collapsible Syntax Reference */}
-        <Accordion>
-          <AccordionItem
-            title={intl.formatMessage({
-              defaultMessage: "Syntax reference",
-              description: "Title for the syntax reference section",
-            })}
-          >
-            <Box padding="1u">
-              <Rows spacing="1u">
-                {currentConfig.syntaxHelp.map((item, index) => (
-                  <Text key={index} size="small">
-                    <FormattedMessage
-                      defaultMessage="<b>{label}:</b> {description}"
-                      description="Syntax help item"
-                      values={{
-                        b: (chunks) => <strong>{chunks}</strong>,
-                        label: item.label,
-                        description: item.description,
-                      }}
-                    />
-                  </Text>
-                ))}
-              </Rows>
+          {/* Collapsible Syntax Reference */}
+          <Accordion>
+            <AccordionItem
+              title={intl.formatMessage({
+                defaultMessage: "Syntax reference",
+                description:
+                  "Title for the syntax reference section",
+              })}
+            >
+              <Box padding="1u">
+                <Rows spacing="1u">
+                  {currentConfig.syntaxHelp.map(
+                    (item, index) => (
+                      <Text key={index} size="small">
+                        <FormattedMessage
+                          defaultMessage="<b>{label}:</b> {description}"
+                          description="Syntax help item"
+                          values={{
+                            b: (chunks) => (
+                              <strong>{chunks}</strong>
+                            ),
+                            label: item.label,
+                            description: item.description,
+                          }}
+                        />
+                      </Text>
+                    )
+                  )}
+                </Rows>
+              </Box>
+            </AccordionItem>
+          </Accordion>
+
+          {/* Code Input */}
+          <Rows spacing="1u">
+            <Title size="small">
+              {intl.formatMessage({
+                defaultMessage: "Code",
+                description: "Label for the code input field",
+              })}
+            </Title>
+            <MultilineInput
+              minRows={6}
+              maxRows={10}
+              value={codeInput}
+              onChange={(value) => setCodeInput(value)}
+              placeholder={intl.formatMessage({
+                defaultMessage: "Enter diagram code here...",
+                description: "Placeholder for code input",
+              })}
+            />
+          </Rows>
+
+          {/* Preview */}
+          <Rows spacing="1u">
+            <Title size="small">
+              {intl.formatMessage({
+                defaultMessage: "Preview",
+                description:
+                  "Label for the diagram preview section",
+              })}
+            </Title>
+            <Box
+              background="neutral"
+              borderRadius="standard"
+              padding="2u"
+            >
+              <div
+                ref={previewRef}
+                className={styles.graphPreview}
+              />
             </Box>
-          </AccordionItem>
-        </Accordion>
+          </Rows>
 
-        {/* Code Input */}
-        <Rows spacing="1u">
-          <Title size="small">
-            {intl.formatMessage({
-              defaultMessage: "Code",
-              description: "Label for the code input field",
-            })}
-          </Title>
-          <MultilineInput
-            minRows={6}
-            maxRows={10}
-            value={codeInput}
-            onChange={(value) => setCodeInput(value)}
-            placeholder={intl.formatMessage({
-              defaultMessage: "Enter diagram code here...",
-              description: "Placeholder for code input",
-            })}
-          />
-        </Rows>
+          {/* Error message */}
+          {error && <Alert tone="critical">{error}</Alert>}
 
-        {/* Preview */}
-        <Rows spacing="1u">
-          <Title size="small">
-            {intl.formatMessage({
-              defaultMessage: "Preview",
-              description: "Label for the diagram preview section",
-            })}
-          </Title>
-          <Box background="neutral" borderRadius="standard" padding="2u">
-            <div ref={previewRef} className={styles.graphPreview} />
-          </Box>
-        </Rows>
-
-        {/* Error message */}
-        {error && <Alert tone="critical">{error}</Alert>}
-
-        {/* Add to Design button */}
-        <Button
-          variant="primary"
-          onClick={handleAddToDesign}
-          disabled={!addElement || isLoading || !hasValidDiagram}
-          loading={isLoading}
-          stretch
-          tooltipLabel={
-            !addElement
-              ? intl.formatMessage({
-                  defaultMessage:
-                    "This feature is not supported in the current page",
-                  description:
-                    "Tooltip label for when a feature is not supported",
-                })
-              : !hasValidDiagram
+          {/* Add to Design button */}
+          <Button
+            variant="primary"
+            onClick={handleAddToDesign}
+            disabled={
+              !addElement || isLoading || !hasValidDiagram
+            }
+            loading={isLoading}
+            stretch
+            tooltipLabel={
+              !addElement
                 ? intl.formatMessage({
-                    defaultMessage: "Enter valid code to enable",
+                    defaultMessage:
+                      "This feature is not supported in the current page",
                     description:
-                      "Tooltip label for when there is no valid diagram",
+                      "Tooltip label for when a feature is not supported",
                   })
-                : undefined
-          }
-        >
-          {intl.formatMessage({
-            defaultMessage: "Add to design",
-            description: "Button text to add diagram to design",
-          })}
-        </Button>
+                : !hasValidDiagram
+                  ? intl.formatMessage({
+                      defaultMessage:
+                        "Enter valid code to enable",
+                      description:
+                        "Tooltip label for when there is no valid diagram",
+                    })
+                  : undefined
+            }
+          >
+            {intl.formatMessage({
+              defaultMessage: "Add to design",
+              description:
+                "Button text to add diagram to design",
+            })}
+          </Button>
         </Rows>
       </Box>
     </Scrollable>

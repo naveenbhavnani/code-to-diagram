@@ -49,6 +49,9 @@ export function buildConfig({
 
   return {
     mode,
+    experiments: {
+      asyncWebAssembly: true,
+    },
     context: path.resolve(process.cwd(), "./"),
     entry: inHarness
       ? {

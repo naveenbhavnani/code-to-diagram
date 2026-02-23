@@ -23,6 +23,53 @@ jest.mock("wavedrom", () => ({
   },
 }));
 
+jest.mock("mermaid", () => ({
+  default: {
+    initialize: jest.fn(),
+    render: jest.fn(() =>
+      Promise.resolve({ svg: "<svg></svg>" })
+    ),
+  },
+  __esModule: true,
+}));
+
+jest.mock("vega-lite", () => ({
+  compile: jest.fn(() => ({
+    spec: {},
+  })),
+}));
+
+jest.mock("vega", () => ({
+  parse: jest.fn(() => ({})),
+  View: jest.fn(() => ({
+    toSVG: jest.fn(() => Promise.resolve("<svg></svg>")),
+    finalize: jest.fn(),
+  })),
+}));
+
+jest.mock("railroad-diagrams", () => {
+  const mockItem = {
+    addTo: jest.fn(),
+    toSVG: jest.fn(() =>
+      document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    ),
+    format: jest.fn(),
+  };
+  return {
+    Diagram: jest.fn(() => mockItem),
+    ComplexDiagram: jest.fn(() => mockItem),
+    Sequence: jest.fn(() => mockItem),
+    Choice: jest.fn(() => mockItem),
+    Optional: jest.fn(() => mockItem),
+    OneOrMore: jest.fn(() => mockItem),
+    ZeroOrMore: jest.fn(() => mockItem),
+    Terminal: jest.fn(() => mockItem),
+    NonTerminal: jest.fn(() => mockItem),
+    Comment: jest.fn(() => mockItem),
+    Skip: jest.fn(() => mockItem),
+  };
+});
+
 
 // Import Canva SDK testing utilities
 import * as asset from "@canva/asset/test";

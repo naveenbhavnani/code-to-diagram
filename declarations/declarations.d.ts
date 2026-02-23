@@ -28,6 +28,54 @@ declare module "*.svg" {
 
 declare const BACKEND_HOST: string;
 
+// Type declaration for railroad-diagrams
+declare module "railroad-diagrams" {
+  interface DiagramItem {
+    addTo(parent: HTMLElement | DiagramItem): void;
+    toSVG(): SVGElement;
+    format(
+      x?: number,
+      y?: number,
+      width?: number
+    ): DiagramItem;
+  }
+  export function Diagram(
+    ...items: (DiagramItem | string)[]
+  ): DiagramItem;
+  export function ComplexDiagram(
+    ...items: (DiagramItem | string)[]
+  ): DiagramItem;
+  export function Sequence(
+    ...items: (DiagramItem | string)[]
+  ): DiagramItem;
+  export function Choice(
+    defaultIndex: number,
+    ...items: (DiagramItem | string)[]
+  ): DiagramItem;
+  export function Optional(
+    item: DiagramItem | string,
+    skip?: string
+  ): DiagramItem;
+  export function OneOrMore(
+    item: DiagramItem | string,
+    repeat?: DiagramItem | string
+  ): DiagramItem;
+  export function ZeroOrMore(
+    item: DiagramItem | string,
+    repeat?: DiagramItem | string
+  ): DiagramItem;
+  export function Terminal(
+    text: string,
+    href?: string
+  ): DiagramItem;
+  export function NonTerminal(
+    text: string,
+    href?: string
+  ): DiagramItem;
+  export function Comment(text: string): DiagramItem;
+  export function Skip(): DiagramItem;
+}
+
 // Type declaration for wavedrom
 declare module "wavedrom" {
   interface WaveDrom {
