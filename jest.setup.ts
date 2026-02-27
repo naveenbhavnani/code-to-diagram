@@ -33,20 +33,6 @@ jest.mock("mermaid", () => ({
   __esModule: true,
 }));
 
-jest.mock("vega-lite", () => ({
-  compile: jest.fn(() => ({
-    spec: {},
-  })),
-}));
-
-jest.mock("vega", () => ({
-  parse: jest.fn(() => ({})),
-  View: jest.fn(() => ({
-    toSVG: jest.fn(() => Promise.resolve("<svg></svg>")),
-    finalize: jest.fn(),
-  })),
-}));
-
 jest.mock("railroad-diagrams", () => {
   const mockItem = {
     addTo: jest.fn(),

@@ -20,9 +20,6 @@ import { instance, type Viz } from "@viz-js/viz";
 import nomnoml from "nomnoml";
 import wavedrom from "wavedrom";
 import mermaid from "mermaid";
-import { render as svgbobRender } from "svgbob-wasm";
-import * as vegaLite from "vega-lite";
-import * as vega from "vega";
 import {
   Diagram as RailroadDiagram,
   Sequence,
@@ -38,8 +35,170 @@ import {
 } from "railroad-diagrams";
 import * as styles from "styles/components.css";
 
-// Initialize mermaid with no auto-start
-mermaid.initialize({ startOnLoad: false, theme: "default" });
+// Mermaid initialized lazily on first use
+let mermaidInitialized = false;
+function ensureMermaidInit() {
+  if (!mermaidInitialized) {
+    mermaid.initialize({ startOnLoad: false, theme: "default" });
+    mermaidInitialized = true;
+  }
+}
+
+// CSS properties to inline from computed styles
+const INLINE_STYLE_PROPS = [
+  "fill",
+  "stroke",
+  "stroke-width",
+  "stroke-dasharray",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "opacity",
+  "fill-opacity",
+  "stroke-opacity",
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "text-anchor",
+  "dominant-baseline",
+  "color",
+  "rx",
+  "ry",
+] as const;
+
+/**
+ * Walk all elements in an SVG that's currently in the DOM,
+ * read their computed styles, and inline them as style attributes.
+ * This must be called BEFORE removing <style> tags.
+ */
+function inlineComputedStyles(svgEl: SVGElement): void {
+  const allElements = svgEl.querySelectorAll("*");
+  allElements.forEach((el) => {
+    if (!(el instanceof SVGElement) && !(el instanceof HTMLElement)) return;
+    const computed = window.getComputedStyle(el);
+    const inlined: string[] = [];
+    for (const prop of INLINE_STYLE_PROPS) {
+      const val = computed.getPropertyValue(prop);
+      if (val && val !== "none" && val !== "normal" && val !== "0px") {
+        inlined.push(`${prop}:${val}`);
+      }
+    }
+    if (inlined.length > 0) {
+      const existing = el.getAttribute("style") || "";
+      el.setAttribute(
+        "style",
+        existing ? `${existing};${inlined.join(";")}` : inlined.join(";")
+      );
+    }
+  });
+}
+
+/**
+ * Sanitize an SVG element for canvas rasterization.
+ * Must be called AFTER inlineComputedStyles (while SVG is in DOM).
+ * Removes foreignObject elements (which taint the canvas)
+ * and <style> tags (now redundant after inlining).
+ */
+function sanitizeSvgForCanvas(svgEl: SVGElement): void {
+  // Remove all foreignObject elements — they taint the canvas
+  const foreignObjects = svgEl.querySelectorAll("foreignObject");
+  foreignObjects.forEach((fo) => {
+    // Try to extract text content as a fallback <text> element
+    const textContent = fo.textContent?.trim();
+    if (textContent) {
+      const textEl = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "text"
+      );
+      const x = fo.getAttribute("x") || "0";
+      const y = fo.getAttribute("y") || "0";
+      const foWidth = parseFloat(
+        fo.getAttribute("width") || "100"
+      );
+      textEl.setAttribute("x", String(parseFloat(x) + foWidth / 2));
+      textEl.setAttribute(
+        "y",
+        String(parseFloat(y) + 20)
+      );
+      textEl.setAttribute("text-anchor", "middle");
+      textEl.setAttribute("font-size", "14");
+      textEl.setAttribute("font-family", "sans-serif");
+      textEl.textContent = textContent;
+      fo.parentNode?.replaceChild(textEl, fo);
+    } else {
+      fo.remove();
+    }
+  });
+
+  // Remove <style> tags (styles are already inlined)
+  const styleTags = svgEl.querySelectorAll("style");
+  styleTags.forEach((styleTag) => styleTag.remove());
+}
+
+/**
+ * Rasterize a live DOM SVG element to a PNG data URL.
+ * 1. Inline computed styles (while SVG is still in the DOM)
+ * 2. Clone the SVG
+ * 3. Sanitize the clone (remove foreignObject, style tags)
+ * 4. Render to canvas and export as PNG
+ */
+function svgToPngDataUrl(
+  liveSvgEl: SVGElement,
+  width: number,
+  height: number
+): Promise<string> {
+  // Step 1: Inline computed styles while SVG is live in the DOM
+  inlineComputedStyles(liveSvgEl);
+
+  // Step 2: Clone after inlining so the clone has all styles
+  const svgEl = liveSvgEl.cloneNode(true) as SVGElement;
+
+  // Step 3: Sanitize the clone
+  sanitizeSvgForCanvas(svgEl);
+
+  // Ensure xmlns is set for standalone SVG
+  svgEl.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  svgEl.setAttribute(
+    "xmlns:xlink",
+    "http://www.w3.org/1999/xlink"
+  );
+
+  svgEl.setAttribute("width", String(width));
+  svgEl.setAttribute("height", String(height));
+
+  return new Promise((resolve, reject) => {
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(svgEl);
+
+    // Use inline data URL instead of blob URL to avoid tainting
+    const dataUrl = `data:image/svg+xml;base64,${btoa(
+      unescape(encodeURIComponent(svgString))
+    )}`;
+
+    const img = new Image();
+    img.onload = () => {
+      // Use 2x scale for sharper output
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Could not get canvas context"));
+        return;
+      }
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => {
+      reject(new Error("Failed to load SVG as image"));
+    };
+    img.src = dataUrl;
+  });
+}
 
 // Diagram syntax types
 type DiagramSyntax =
@@ -47,8 +206,6 @@ type DiagramSyntax =
   | "nomnoml"
   | "wavedrom"
   | "mermaid"
-  | "svgbob"
-  | "vegalite"
   | "railroad";
 
 interface SyntaxConfig {
@@ -193,7 +350,7 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
       },
       {
         label: "Composition",
-        description: "[Whole] +--> [Part]",
+        description: "[Whole] +-> [Part]",
       },
       {
         label: "Note",
@@ -247,99 +404,22 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
       {
         label: "Sequence",
         description:
-          "sequenceDiagram; Alice->>Bob: Hello",
+          "sequenceDiagram (newline) Alice->>Bob: Hello",
       },
       {
         label: "Class",
-        description: "classDiagram; class Animal { +name }",
+        description:
+          "classDiagram (newline) class Animal { +name }",
       },
       {
         label: "ER",
         description:
-          "erDiagram; CUSTOMER ||--o{ ORDER : places",
+          "erDiagram (newline) A ||--o{ B : places",
       },
       {
         label: "Gantt",
         description:
-          "gantt; title Plan; section A; Task :a1, 2024-01-01, 30d",
-      },
-    ],
-  },
-  svgbob: {
-    defaultCode: `       .----.
-      |    |
-      v    |
-  +--------+-------+
-  |  Start |       |
-  +--------+       |
-      |            |
-      v            |
-  +--------+       |
-  | Process|-------'
-  +--------+
-      |
-      v
-  +--------+
-  |  End   |
-  +--------+`,
-    syntaxHelp: [
-      {
-        label: "Boxes",
-        description: "+----+ or .----. for rounded",
-      },
-      {
-        label: "Arrows",
-        description: "-->, <--, <-->, |, v, ^",
-      },
-      { label: "Lines", description: "--- or |" },
-      { label: "Text", description: "Place text inside boxes" },
-      {
-        label: "Circles",
-        description: "Use ( ) for circles in connections",
-      },
-    ],
-  },
-  vegalite: {
-    defaultCode: `{
-  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-  "description": "A simple bar chart",
-  "data": {
-    "values": [
-      {"category": "A", "value": 28},
-      {"category": "B", "value": 55},
-      {"category": "C", "value": 43},
-      {"category": "D", "value": 91},
-      {"category": "E", "value": 81}
-    ]
-  },
-  "mark": "bar",
-  "encoding": {
-    "x": {"field": "category", "type": "nominal"},
-    "y": {"field": "value", "type": "quantitative"}
-  }
-}`,
-    syntaxHelp: [
-      {
-        label: "Mark",
-        description: '"mark": "bar/line/point/area/arc"',
-      },
-      {
-        label: "Encoding",
-        description:
-          '"encoding": { "x": { "field", "type" } }',
-      },
-      {
-        label: "Types",
-        description:
-          "quantitative, nominal, ordinal, temporal",
-      },
-      {
-        label: "Data",
-        description: '"data": { "values": [...] }',
-      },
-      {
-        label: "Layers",
-        description: '"layer": [{ "mark", "encoding" }, ...]',
+          "gantt (newline) title Plan (newline) section A",
       },
     ],
   },
@@ -426,22 +506,6 @@ export const App = () => {
         }),
       },
       {
-        value: "nomnoml",
-        label: intl.formatMessage({
-          defaultMessage: "Nomnoml (UML)",
-          description:
-            "Dropdown option for Nomnoml UML diagram syntax",
-        }),
-      },
-      {
-        value: "wavedrom",
-        label: intl.formatMessage({
-          defaultMessage: "WaveDrom (Timing)",
-          description:
-            "Dropdown option for WaveDrom timing diagram syntax",
-        }),
-      },
-      {
         value: "mermaid",
         label: intl.formatMessage({
           defaultMessage: "Mermaid (Multi-purpose)",
@@ -450,19 +514,11 @@ export const App = () => {
         }),
       },
       {
-        value: "svgbob",
+        value: "nomnoml",
         label: intl.formatMessage({
-          defaultMessage: "Svgbob (ASCII Art)",
+          defaultMessage: "Nomnoml (UML)",
           description:
-            "Dropdown option for Svgbob ASCII art diagram syntax",
-        }),
-      },
-      {
-        value: "vegalite",
-        label: intl.formatMessage({
-          defaultMessage: "Vega-Lite (Charts)",
-          description:
-            "Dropdown option for Vega-Lite chart syntax",
+            "Dropdown option for Nomnoml UML diagram syntax",
         }),
       },
       {
@@ -471,6 +527,14 @@ export const App = () => {
           defaultMessage: "Railroad (Syntax)",
           description:
             "Dropdown option for Railroad syntax diagram",
+        }),
+      },
+      {
+        value: "wavedrom",
+        label: intl.formatMessage({
+          defaultMessage: "WaveDrom (Timing)",
+          description:
+            "Dropdown option for WaveDrom timing diagram syntax",
         }),
       },
     ],
@@ -544,11 +608,6 @@ export const App = () => {
             container.innerHTML = html;
             return true;
           }
-          case "svgbob": {
-            const svgString = svgbobRender(code);
-            container.innerHTML = svgString;
-            return true;
-          }
           case "railroad": {
             const spec = JSON.parse(code.trim()) as RailroadNode;
             const items = (spec.items ?? []).map(
@@ -584,21 +643,10 @@ export const App = () => {
       try {
         switch (syntax) {
           case "mermaid": {
+            ensureMermaidInit();
             const id = `mermaid-${++mermaidRenderCounter}`;
             const { svg } = await mermaid.render(id, code);
             container.innerHTML = svg;
-            return true;
-          }
-          case "vegalite": {
-            const spec = JSON.parse(code.trim());
-            const vgSpec = vegaLite.compile(spec).spec;
-            const view = new vega.View(
-              vega.parse(vgSpec),
-              { renderer: "none" }
-            );
-            const svgString = await view.toSVG();
-            view.finalize();
-            container.innerHTML = svgString;
             return true;
           }
           default:
@@ -611,7 +659,8 @@ export const App = () => {
     [syntax]
   );
 
-  const isAsyncSyntax = syntax === "mermaid" || syntax === "vegalite";
+  const isAsyncSyntax =
+    syntax === "mermaid";
 
   // Render preview whenever input or syntax changes
   useEffect(() => {
@@ -748,21 +797,38 @@ export const App = () => {
       bgRect.setAttribute("fill", "#ffffff");
       svgClone.insertBefore(bgRect, svgClone.firstChild);
 
-      // Serialize SVG
-      const serializer = new XMLSerializer();
-      const svgString =
-        serializer.serializeToString(svgClone);
+      let dataUrl: string;
+      let mimeType: "image/svg+xml" | "image/png" =
+        "image/svg+xml";
 
-      // Convert to base64
-      const base64 = btoa(
-        unescape(encodeURIComponent(svgString))
-      );
-      const dataUrl = `data:image/svg+xml;base64,${base64}`;
+      if (syntax === "mermaid") {
+        // Mermaid SVGs contain foreignObject, style tags, and
+        // complex CSS that Canva's SVG parser rejects.
+        // Pass the LIVE DOM svg (not clone) so computed styles
+        // can be read. svgToPngDataUrl handles its own cloning.
+        dataUrl = await svgToPngDataUrl(
+          svgElement as SVGElement,
+          totalWidth,
+          totalHeight
+        );
+        mimeType = "image/png";
+      } else {
+        // Serialize SVG
+        const serializer = new XMLSerializer();
+        const svgString =
+          serializer.serializeToString(svgClone);
+
+        // Convert to base64
+        const base64 = btoa(
+          unescape(encodeURIComponent(svgString))
+        );
+        dataUrl = `data:image/svg+xml;base64,${base64}`;
+      }
 
       // Upload to Canva
       const result = await upload({
         type: "image",
-        mimeType: "image/svg+xml",
+        mimeType,
         url: dataUrl,
         thumbnailUrl: dataUrl,
         aiDisclosure: "none",

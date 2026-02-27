@@ -49,9 +49,6 @@ export function buildConfig({
 
   return {
     mode,
-    experiments: {
-      asyncWebAssembly: true,
-    },
     context: path.resolve(process.cwd(), "./"),
     entry: inHarness
       ? {
@@ -68,6 +65,7 @@ export function buildConfig({
         utils: path.resolve(process.cwd(), "utils"),
         styles: path.resolve(process.cwd(), "styles"),
         src: path.resolve(process.cwd(), "src"),
+        katex: false,
       },
       extensions: [".ts", ".tsx", ".js", ".css", ".svg", ".woff", ".woff2"],
       fallback: {

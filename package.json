@@ -37,10 +37,6 @@
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "react-intl": "^7.1.11",
-    "svgbob-wasm": "^1.0.0",
-    "vega": "^6.2.0",
-    "vega-embed": "^7.1.0",
-    "vega-lite": "^6.4.2",
     "wavedrom": "^3.5.0"
   },
   "devDependencies": {

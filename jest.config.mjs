@@ -11,10 +11,7 @@ export default {
   testRegex: "(/(tests|__tests__)/.*|(\\.|/)(tests))\\.tsx?$",
   modulePathIgnorePatterns: ["./internal/", "./node_modules/"],
   modulePaths: [compilerOptions.baseUrl],
-  moduleNameMapper: {
-    ...pathsToModuleNameMapper(compilerOptions.paths || {}),
-    "^svgbob-wasm$": "<rootDir>/__mocks__/svgbob-wasm.js",
-  },
+  moduleNameMapper: pathsToModuleNameMapper(compilerOptions.paths || {}),
   transform: {
     ".+\\.(css)$": "jest-css-modules-transform",
     "^.+\\.tsx?$": [
