@@ -1,5 +1,6 @@
 {
   "private": true,
+  "version": "4",
   "name": "code-to-diagram",
   "description": "Convert code syntax to visual diagrams (DOT, Nomnoml, WaveDrom, Pikchr)",
   "license": "SEE LICENSE IN LICENSE.md",

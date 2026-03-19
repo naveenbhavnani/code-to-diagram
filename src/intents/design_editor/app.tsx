@@ -5,14 +5,19 @@ import {
   Alert,
   Box,
   Button,
+  ColorSelector,
+  FormField,
   MultilineInput,
   Rows,
   Scrollable,
+  Link,
   Select,
+  Switch,
   Text,
   Title,
 } from "@canva/app-ui-kit";
 import { upload } from "@canva/asset";
+import { requestOpenExternalUrl } from "@canva/platform";
 import { addElementAtCursor, addElementAtPoint } from "@canva/design";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
@@ -35,12 +40,13 @@ import {
 } from "railroad-diagrams";
 import * as styles from "styles/components.css";
 
-// Mermaid initialized lazily on first use
-let mermaidInitialized = false;
-function ensureMermaidInit() {
-  if (!mermaidInitialized) {
-    mermaid.initialize({ startOnLoad: false, theme: "default" });
-    mermaidInitialized = true;
+// Mermaid initialized lazily on first use, re-inits when theme changes
+type MermaidTheme = "default" | "dark" | "forest" | "neutral";
+let mermaidCurrentTheme: MermaidTheme | null = null;
+function ensureMermaidInit(theme: MermaidTheme = "default") {
+  if (mermaidCurrentTheme !== theme) {
+    mermaid.initialize({ startOnLoad: false, theme });
+    mermaidCurrentTheme = theme;
   }
 }
 
@@ -177,8 +183,8 @@ function svgToPngDataUrl(
 
     const img = new Image();
     img.onload = () => {
-      // Use 2x scale for sharper output
-      const scale = 2;
+      // Use 4x scale for sharper output on large diagrams
+      const scale = 4;
       const canvas = document.createElement("canvas");
       canvas.width = width * scale;
       canvas.height = height * scale;
@@ -211,6 +217,7 @@ type DiagramSyntax =
 interface SyntaxConfig {
   defaultCode: string;
   syntaxHelp: { label: string; description: string }[];
+  docsUrl: string;
 }
 
 // Railroad diagram JSON node types
@@ -311,6 +318,7 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
           "rankdir=TB (top-bottom) | LR (left-right)",
       },
     ],
+    docsUrl: "https://graphviz.org/documentation/",
   },
   nomnoml: {
     defaultCode: `[User] -> [Application]
@@ -357,6 +365,7 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
         description: "[<note> This is a note]",
       },
     ],
+    docsUrl: "https://nomnoml.com/",
   },
   wavedrom: {
     defaultCode: `{ "signal": [
@@ -388,6 +397,7 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
         description: '["Group", { name, wave }, ...]',
       },
     ],
+    docsUrl: "https://wavedrom.com/tutorial.html",
   },
   mermaid: {
     defaultCode: `graph TD
@@ -422,6 +432,7 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
           "gantt (newline) title Plan (newline) section A",
       },
     ],
+    docsUrl: "https://mermaid.js.org/intro/syntax-reference.html",
   },
   railroad: {
     defaultCode: `{
@@ -484,6 +495,7 @@ const SYNTAX_CONFIGS: Record<DiagramSyntax, SyntaxConfig> = {
           '{ "type": "OneOrMore"/"ZeroOrMore", "items": [...], "repeat": {...} }',
       },
     ],
+    docsUrl: "https://github.com/tabatkins/railroad-diagrams/blob/gh-pages/README.md",
   },
 };
 
@@ -556,6 +568,23 @@ export const App = () => {
   const previewRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
+  // Advanced options — Railroad colors
+  const [railroadBoxFill, setRailroadBoxFill] =
+    useState("#ccffcc");
+  const [railroadBoxBorder, setRailroadBoxBorder] =
+    useState("#000000");
+  const [railroadBg, setRailroadBg] =
+    useState("#ffffff");
+  const [railroadTextColor, setRailroadTextColor] =
+    useState("#000000");
+
+  // Advanced options toggle
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Advanced options — Mermaid theme
+  const [mermaidTheme, setMermaidTheme] =
+    useState<MermaidTheme>("default");
+
   // Initialize Viz.js instance once
   useEffect(() => {
     instance().then(setVizInstance);
@@ -567,6 +596,13 @@ export const App = () => {
     setSyntax(typedSyntax);
     setCodeInput(SYNTAX_CONFIGS[typedSyntax].defaultCode);
     setError(null);
+    // Reset advanced options
+    setShowAdvanced(false);
+    setRailroadBoxFill("#ccffcc");
+    setRailroadBoxBorder("#000000");
+    setRailroadBg("#ffffff");
+    setRailroadTextColor("#000000");
+    setMermaidTheme("default");
   };
 
   // Render diagram based on current syntax
@@ -615,6 +651,39 @@ export const App = () => {
             );
             const diagram = RailroadDiagram(...items);
             const svgEl = diagram.toSVG();
+            // Inject railroad CSS directly into SVG so styles
+            // work both in preview and when exported
+            const styleEl = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "style"
+            );
+            styleEl.textContent = `
+              svg.railroad-diagram {
+                background-color: ${railroadBg};
+              }
+              svg.railroad-diagram path {
+                stroke-width: 3;
+                stroke: ${railroadBoxBorder};
+                fill: rgba(0,0,0,0);
+              }
+              svg.railroad-diagram text {
+                font: bold 14px monospace;
+                text-anchor: middle;
+                fill: ${railroadTextColor};
+              }
+              svg.railroad-diagram text.label {
+                text-anchor: start;
+              }
+              svg.railroad-diagram text.comment {
+                font: italic 12px monospace;
+              }
+              svg.railroad-diagram rect {
+                stroke-width: 3;
+                stroke: ${railroadBoxBorder};
+                fill: ${railroadBoxFill};
+              }
+            `;
+            svgEl.insertBefore(styleEl, svgEl.firstChild);
             container.appendChild(svgEl);
             return true;
           }
@@ -625,7 +694,7 @@ export const App = () => {
         return false;
       }
     },
-    [syntax, vizInstance]
+    [syntax, vizInstance, railroadBoxFill, railroadBoxBorder, railroadBg, railroadTextColor]
   );
 
   // Async render for mermaid and vega-lite
@@ -643,7 +712,7 @@ export const App = () => {
       try {
         switch (syntax) {
           case "mermaid": {
-            ensureMermaidInit();
+            ensureMermaidInit(mermaidTheme);
             const id = `mermaid-${++mermaidRenderCounter}`;
             const { svg } = await mermaid.render(id, code);
             container.innerHTML = svg;
@@ -656,7 +725,7 @@ export const App = () => {
         return false;
       }
     },
-    [syntax]
+    [syntax, mermaidTheme]
   );
 
   const isAsyncSyntax =
@@ -753,13 +822,47 @@ export const App = () => {
         true
       ) as SVGElement;
 
-      // Get dimensions
-      const width = parseFloat(
-        svgElement.getAttribute("width") || "400"
+      // Get dimensions from viewBox (most reliable for Mermaid),
+      // then numeric attributes, then style max-width, then defaults.
+      // Mermaid v11 sets style="max-width: Xpx" instead of width attr.
+      const viewBox = svgElement.getAttribute("viewBox");
+      const vbParts = viewBox
+        ? viewBox.split(/[\s,]+/).map(parseFloat)
+        : [];
+      const vbW = vbParts[2] || 0;
+      const vbH = vbParts[3] || 0;
+
+      const attrW = parseFloat(
+        svgElement.getAttribute("width") || "0"
       );
-      const height = parseFloat(
-        svgElement.getAttribute("height") || "300"
+      const attrH = parseFloat(
+        svgElement.getAttribute("height") || "0"
       );
+      // Only trust attribute values if they look like absolute pixels
+      // (not "100%" which parseFloat reads as 100)
+      const attrWValid =
+        attrW > 0 &&
+        !/[%]/.test(svgElement.getAttribute("width") || "");
+      const attrHValid =
+        attrH > 0 &&
+        !/[%]/.test(svgElement.getAttribute("height") || "");
+
+      // Parse style max-width/max-height (Mermaid sets these)
+      const styleMaxW = parseFloat(
+        svgElement.style.maxWidth || "0"
+      );
+      const styleMaxH = parseFloat(
+        svgElement.style.maxHeight || "0"
+      );
+
+      const width = vbW > 0 ? vbW
+        : attrWValid ? attrW
+        : styleMaxW > 0 ? styleMaxW
+        : 400;
+      const height = vbH > 0 ? vbH
+        : attrHValid ? attrH
+        : styleMaxH > 0 ? styleMaxH
+        : 300;
 
       // Add padding
       const padding = 20;
@@ -767,18 +870,14 @@ export const App = () => {
       const totalHeight = height + padding * 2;
 
       // Update viewBox
-      const viewBox = svgElement.getAttribute("viewBox");
       if (viewBox) {
-        const parts = viewBox
-          .split(/[\s,]+/)
-          .map(parseFloat);
-        const vbX = parts[0] ?? 0;
-        const vbY = parts[1] ?? 0;
-        const vbW = parts[2] ?? width;
-        const vbH = parts[3] ?? height;
+        const vbX = vbParts[0] ?? 0;
+        const vbY = vbParts[1] ?? 0;
+        const vbWidthVal = vbParts[2] ?? width;
+        const vbHeightVal = vbParts[3] ?? height;
         svgClone.setAttribute(
           "viewBox",
-          `${vbX - padding} ${vbY - padding} ${vbW + padding * 2} ${vbH + padding * 2}`
+          `${vbX - padding} ${vbY - padding} ${vbWidthVal + padding * 2} ${vbHeightVal + padding * 2}`
         );
       }
 
@@ -870,7 +969,8 @@ export const App = () => {
           position: "absolute",
           left: "-9999px",
           top: 0,
-          width: "800px",
+          width: "4000px",
+          overflow: "visible",
         }}
       />
       <Box padding="2u">
@@ -919,6 +1019,19 @@ export const App = () => {
                       </Text>
                     )
                   )}
+                  <Link
+                    href={currentConfig.docsUrl}
+                    requestOpenExternalUrl={() =>
+                      requestOpenExternalUrl({
+                        url: currentConfig.docsUrl,
+                      })
+                    }
+                  >
+                    <FormattedMessage
+                      defaultMessage="Full documentation"
+                      description="Link text for external syntax documentation"
+                    />
+                  </Link>
                 </Rows>
               </Box>
             </AccordionItem>
@@ -943,6 +1056,132 @@ export const App = () => {
               })}
             />
           </Rows>
+
+          {/* Advanced Options — only for Railroad and Mermaid */}
+          {(syntax === "railroad" || syntax === "mermaid") && (
+            <Rows spacing="1.5u">
+              <Switch
+                label={intl.formatMessage({
+                  defaultMessage: "Advanced options",
+                  description:
+                    "Toggle for showing advanced options",
+                })}
+                value={showAdvanced}
+                onChange={setShowAdvanced}
+              />
+              {showAdvanced && (
+                <Rows spacing="1.5u">
+                  {syntax === "railroad" && (
+                    <>
+                      <FormField
+                        label={intl.formatMessage({
+                          defaultMessage: "Box fill",
+                          description:
+                            "Label for railroad box fill color picker",
+                        })}
+                        control={() => (
+                          <ColorSelector
+                            color={railroadBoxFill}
+                            onChange={setRailroadBoxFill}
+                          />
+                        )}
+                      />
+                      <FormField
+                        label={intl.formatMessage({
+                          defaultMessage: "Border & lines",
+                          description:
+                            "Label for railroad border color picker",
+                        })}
+                        control={() => (
+                          <ColorSelector
+                            color={railroadBoxBorder}
+                            onChange={setRailroadBoxBorder}
+                          />
+                        )}
+                      />
+                      <FormField
+                        label={intl.formatMessage({
+                          defaultMessage: "Background",
+                          description:
+                            "Label for railroad background color picker",
+                        })}
+                        control={() => (
+                          <ColorSelector
+                            color={railroadBg}
+                            onChange={setRailroadBg}
+                          />
+                        )}
+                      />
+                      <FormField
+                        label={intl.formatMessage({
+                          defaultMessage: "Text color",
+                          description:
+                            "Label for railroad text color picker",
+                        })}
+                        control={() => (
+                          <ColorSelector
+                            color={railroadTextColor}
+                            onChange={setRailroadTextColor}
+                          />
+                        )}
+                      />
+                    </>
+                  )}
+                  {syntax === "mermaid" && (
+                    <FormField
+                      label={intl.formatMessage({
+                        defaultMessage: "Theme",
+                        description:
+                          "Label for mermaid theme selector",
+                      })}
+                      control={(props) => (
+                        <Select
+                          {...props}
+                          options={[
+                            {
+                              value: "default",
+                              label: intl.formatMessage({
+                                defaultMessage: "Default",
+                                description:
+                                  "Mermaid theme option: default",
+                              }),
+                            },
+                            {
+                              value: "dark",
+                              label: intl.formatMessage({
+                                defaultMessage: "Dark",
+                                description:
+                                  "Mermaid theme option: dark",
+                              }),
+                            },
+                            {
+                              value: "neutral",
+                              label: intl.formatMessage({
+                                defaultMessage: "Neutral",
+                                description:
+                                  "Mermaid theme option: neutral",
+                              }),
+                            },
+                            {
+                              value: "forest",
+                              label: intl.formatMessage({
+                                defaultMessage: "Forest",
+                                description:
+                                  "Mermaid theme option: forest",
+                              }),
+                            },
+                          ]}
+                          value={mermaidTheme}
+                          onChange={(v) => setMermaidTheme(v as MermaidTheme)}
+                          stretch
+                        />
+                      )}
+                    />
+                  )}
+                </Rows>
+              )}
+            </Rows>
+          )}
 
           {/* Preview */}
           <Rows spacing="1u">
